@@ -66,9 +66,13 @@ function createPairingRouter(options = {}) {
 
         setState({ status: 'requesting', number: clean, code: '', sessionId: '', message: 'Pair code manga ja raha hai...' });
 
-        const baileys = require('@whiskeysockets/baileys');
-        const { makeWASocket, useMultiFileAuthState, Browsers } = baileys;
+        // Pairing ke liye STOCK Baileys (gifted fork par socket har chand second 405 band hota tha)
+        const baileys = require('baileys-stock');
+        const makeWASocket = baileys.default || baileys.makeWASocket;
+        const { useMultiFileAuthState, Browsers, fetchLatestBaileysVersion } = baileys;
         const P = require('pino');
+        let waVersion;
+        try { waVersion = (await fetchLatestBaileysVersion()).version; } catch {}
 
         const { state, saveCreds } = await useMultiFileAuthState(tmpDir);
         if (state.creds.registered) {
@@ -99,6 +103,7 @@ function createPairingRouter(options = {}) {
 
         function launchSocket() {
             const sock = makeWASocket({
+                ...(waVersion ? { version: waVersion } : {}),
                 logger: P({ level: 'silent' }),
                 printQRInTerminal: false,
                 markOnlineOnConnect: false,
