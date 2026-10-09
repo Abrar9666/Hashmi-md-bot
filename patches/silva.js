@@ -153,7 +153,20 @@ async function loadSession() {
                 const cleanB64 = b64data.replace('...', '');
                 const compressedData = Buffer.from(cleanB64, 'base64');
                 const decompressedData = zlib.gunzipSync(compressedData);
-                fs.writeFileSync(credsPath, decompressedData, "utf8");
+                let restoredFiles = 0;
+                try {
+                    const parsed = JSON.parse(decompressedData.toString('utf8'));
+                    if (parsed && parsed.__hashmiBundle === 2 && parsed.files) {
+                        for (const [fname, fcontent] of Object.entries(parsed.files)) {
+                            if (/^[A-Za-z0-9._-]+$/.test(fname)) {
+                                try { fs.writeFileSync(path.join(sessionDir, fname), fcontent, 'utf8'); restoredFiles++; } catch {}
+                            }
+                        }
+                    }
+                } catch { /* purana creds-only format */ }
+                if (!restoredFiles) {
+                    fs.writeFileSync(credsPath, decompressedData, "utf8");
+                }
                 logMessage('SUCCESS', "✅ ɴᴇᴡ ꜱᴇꜱꜱɪᴏɴ ʟᴏᴀᴅᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ");
             } else {
                 logMessage('INFO', "📂 Using existing session from disk");
