@@ -128,9 +128,14 @@ function createPairingRouter(options = {}) {
                         for (const f of fs.readdirSync(tmpDir)) {
                             try { fs.copyFileSync(path.join(tmpDir, f), path.join(sessionDir, f)); } catch {}
                         }
-                        // Portable SESSION_ID banao: Hashmi~<gzip base64 of creds.json>
-                        const credsRaw = fs.readFileSync(path.join(tmpDir, 'creds.json'));
-                        const sessionId = 'Hashmi~' + zlib.gzipSync(credsRaw).toString('base64');
+                        // Portable SESSION_ID banao: Hashmi~<gzip base64 of JSON bundle>
+                        // Sirf creds.json se naya server behra ho jata hai (messages ate hi nahi) —
+                        // is liye POORI auth state (creds + prekeys + sessions) bundle karte hain
+                        const bundle = { __hashmiBundle: 2, files: {} };
+                        for (const f of fs.readdirSync(tmpDir)) {
+                            try { bundle.files[f] = fs.readFileSync(path.join(tmpDir, f), 'utf8'); } catch {}
+                        }
+                        const sessionId = 'Hashmi~' + zlib.gzipSync(Buffer.from(JSON.stringify(bundle), 'utf8')).toString('base64');
                         setState({ status: 'paired', code: '', sessionId, message: 'WhatsApp jud gaya! Bot ab restart ho kar online aa jayega.' });
                         log('SUCCESS', `🔗 Pairing mukammal: +${clean} — session main bot mein save ho gayi`);
                         try { sock.end?.(undefined); } catch {}
