@@ -94,6 +94,8 @@ const store = makeInMemoryStore({ logger: P({ level: 'silent' }) });
 let _reconnectCount   = 0;   // how many consecutive failed reconnect attempts
 let _isReconnecting   = false; // guard: only one reconnect in flight at a time
 let _keepAliveTimer   = null;  // handle for the keep-alive presence interval
+let _connectInFlight  = false; // HASHMI: aik waqt mein sirf aik connectToWhatsApp
+let _lastWelcomeAt    = 0;     // HASHMI: welcome throttle — reconnect par owner ko spam na ho
 
 function _scheduleReconnect(fn) {
     if (_isReconnecting) {
@@ -418,6 +420,10 @@ async function updateProfileStatus(sock) {
 
 // ✅ Connect to WhatsApp (main)
 async function connectToWhatsApp() {
+    // HASHMI single-socket guard: parallel connect koshishen hi 440 conflict/spam ki jad hain
+    if (_connectInFlight) { try { logMessage('DEBUG', '[Connect] connect pehle se in-flight hai — duplicate skip'); } catch {} return; }
+    _connectInFlight = true;
+    setTimeout(() => { _connectInFlight = false; }, 45000);
     const seenStatusIds = new Set();
     const seenCmdIds = new Set();
 
@@ -462,6 +468,15 @@ async function connectToWhatsApp() {
         }
     };
 
+    // HASHMI: naya socket banane se pehle purana zinda socket band karo (warna dono takra kar 440 loop)
+    try {
+        const prevSock = global.__hashmiMainSock;
+        if (prevSock) {
+            try { prevSock.end?.(new Error('hashmi-superseded')); } catch {}
+            try { prevSock.ws?.close?.(); } catch {}
+            global.__hashmiMainSock = null;
+        }
+    } catch {}
     const sock = makeWASocket({
         logger: P({ level: 'silent' }),
         // Baileys no longer prints QR codes automatically. Keep QR handling in
@@ -601,6 +616,11 @@ async function connectToWhatsApp() {
         }
 
         if (connection === 'close') {
+            // HASHMI: superseded (purane) socket ka close ignore — us ka reconnect naye socket se takrata tha (440 loop)
+            if (global.__hashmiMainSock && sock !== global.__hashmiMainSock) {
+                try { logMessage('DEBUG', '[Connect] purane socket ka close ignore'); } catch {}
+                return;
+            }
             global.mainBotConnected = false;
             // Stop the keep-alive ping for this socket — a new one starts on reconnect
             if (_keepAliveTimer) { clearInterval(_keepAliveTimer); _keepAliveTimer = null; }
@@ -679,9 +699,12 @@ async function connectToWhatsApp() {
                 logMessage('INFO', `Owner: ${config.OWNER_NUMBER} | Bot number: ${rawNum}`);
             }
 
-            // Update profile & send welcome
+            // Update profile & send welcome (HASHMI: 10-min throttle — har reconnect par owner ko photo spam na jaye)
             await updateProfileStatus(sock);
-            await sendWelcomeMessage(sock);
+            if (Date.now() - _lastWelcomeAt > 10 * 60 * 1000) {
+                _lastWelcomeAt = Date.now();
+                await sendWelcomeMessage(sock);
+            }
 
             // ── Anti-Call handler ──────────────────────────────────────────────
             if (config.ANTICALL !== false) {
@@ -1536,11 +1559,9 @@ process.on('uncaughtException', (err) => {
     try {
         logMessage('CRITICAL', `Uncaught Exception: ${err.stack || err.message}`);
     } catch (_) {}
-    setTimeout(() => {
-        connectToWhatsApp().catch(e => {
-            try { logMessage('CRITICAL', `Reconnect failed: ${e.message}`); } catch (_) {}
-        });
-    }, 5000);
+    // HASHMI: uncaughtException par naya socket NA banao — doosra parallel socket hi 440 conflict aur
+    // welcome-spam ki jad hai. Live socket apne close-handler se khud reconnect kar lega.
+    try { logMessage('WARN', '[HASHMI] uncaughtException par extra-reconnect skip (socket khud sambhalega)'); } catch (_) {}
 });
 process.on('unhandledRejection', (reason, promise) => {
     const msg = String(reason?.message || reason || '');
