@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment and sessions - never commit these
+.env
+.env.*
+session/
+auth_info/
+*.session.json
+
+# Logs and OS files
+*.log
+.DS_Store
